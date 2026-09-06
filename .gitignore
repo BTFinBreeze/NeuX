@@ -5,3 +5,11 @@ __pycache__/
 *.pyo
 *.pyd
 /scripts/test_note_editor_widget.py
+.env
+.agni/kb/
+
+# 仅保留 workspace_template 作为演示工作区，其余工作区不入库
+/Untitled/
+/workspace_test/
+/产品经理/
+/new/
