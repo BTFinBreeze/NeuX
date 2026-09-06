@@ -43,11 +43,13 @@ from app.services.pdf_service import PdfService
 from app.services.reference_service import ReferenceService
 from app.services.search_service import SearchService
 from app.services.workspace_service import WorkspaceService
+from app.services.ppt_service import PPT_SUFFIXES
 from app.ui.actions import AgniActionSet, build_app_stylesheet
 from app.ui.dialogs.command_palette_dialog import CommandPaletteDialog
 from app.ui.dialogs.workspace_picker_dialog import WorkspacePickerDialog
 from app.ui.docks.note_list_dock import NoteListDock
 from app.ui.docks.outline_dock import OutlineDock
+from app.ui.docks.rag_kb_dock import RagKbDock
 from app.ui.docks.search_dock import SearchDock
 from app.ui.models.note_title_store import (
     remove_title_for_path,
@@ -65,6 +67,7 @@ from app.ui.models.ui_items import (
 from app.ui.widgets.knowledge_graph_widget import KnowledgeGraphWidget, PLANET_DEFAULT_COLOR, SUN_COLOR
 from app.ui.widgets.note_editor_widget import NoteEditorWidget
 from app.ui.widgets.pdf_viewer_widget import PdfViewerWidget
+from app.ui.widgets.ppt_viewer_widget import PptViewerWidget
 
 
 class MainWindow(QMainWindow):
@@ -132,7 +135,7 @@ class MainWindow(QMainWindow):
         )
 
         self.setObjectName("agni_main_window")
-        self.setWindowTitle(f"Agni - {self.workspace_root.name}")
+        self.setWindowTitle(f"NeuX - {self.workspace_root.name}")
         self.project_root = Path(__file__).resolve().parents[2]
         self.workspace_store_root = self.project_root
         self.resize(1360, 820)
@@ -156,8 +159,8 @@ class MainWindow(QMainWindow):
         self.note_dock = NoteListDock(self)
         self.search_dock = SearchDock(self)
         self.outline_dock = OutlineDock(self)
+        self.kb_dock = RagKbDock(self)
         self.main_toolbar: QToolBar | None = None
-        self._pre_pdf_dock_visibility: tuple[bool, bool, bool] | None = None
         self._active_right_sidebar = "outline"
         self.workspace_label = QLabel(self)
         self.status_label = QLabel("就绪", self)
@@ -193,7 +196,7 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(28, 20, 28, 20)
         layout.setSpacing(10)
 
-        title = QLabel("Agni 星图", page)
+        title = QLabel("NeuX 星图", page)
         title.setObjectName("cover_title")
         subtitle = QLabel("从工作区进入知识结构，用分类组织笔记、文献、主题和关联。", page)
         subtitle.setObjectName("cover_subtitle")
@@ -244,6 +247,7 @@ class MainWindow(QMainWindow):
         right_sidebar_menu = view_menu.addMenu("右侧边栏")
         right_sidebar_menu.addAction(self.actions.toggle_outline)
         right_sidebar_menu.addAction(self.actions.toggle_search)
+        right_sidebar_menu.addAction(self.actions.toggle_kb)
         view_menu.addSeparator()
         view_menu.addAction(self.actions.toggle_main_toolbar)
 
@@ -251,8 +255,9 @@ class MainWindow(QMainWindow):
         tools_menu.addAction(self.actions.command_palette)
         tools_menu.addAction(self.actions.focus_search)
 
-        pdf_menu = self.menuBar().addMenu("PDF")
+        pdf_menu = self.menuBar().addMenu("文档")
         pdf_menu.addAction(self.actions.open_pdf)
+        pdf_menu.addAction(self.actions.open_ppt)
         pdf_menu.addSeparator()
         pdf_menu.addAction(self.actions.previous_pdf_page)
         pdf_menu.addAction(self.actions.next_pdf_page)
@@ -279,6 +284,7 @@ class MainWindow(QMainWindow):
         toolbar.addAction(self.actions.delete_note)
         toolbar.addSeparator()
         toolbar.addAction(self.actions.open_pdf)
+        toolbar.addAction(self.actions.open_ppt)
         toolbar.addSeparator()
         toolbar.addAction(self.actions.command_palette)
         toolbar.addSeparator()
@@ -292,11 +298,14 @@ class MainWindow(QMainWindow):
         self.setTabPosition(Qt.DockWidgetArea.RightDockWidgetArea, QTabWidget.TabPosition.North)
         self.search_dock.setMinimumWidth(320)
         self.outline_dock.setMinimumWidth(320)
+        self.kb_dock.setMinimumWidth(320)
 
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.note_dock)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.search_dock)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.outline_dock)
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.kb_dock)
         self.tabifyDockWidget(self.search_dock, self.outline_dock)
+        self.tabifyDockWidget(self.outline_dock, self.kb_dock)
         self.outline_dock.raise_()
         self.resizeDocks([self.note_dock], [300], Qt.Orientation.Horizontal)
         self.resizeDocks(
@@ -320,6 +329,7 @@ class MainWindow(QMainWindow):
         self.note_dock.hide()
         self.search_dock.hide()
         self.outline_dock.hide()
+        self.kb_dock.hide()
         self.statusBar().hide()
         self.status_label.setText("星图封面")
 
@@ -335,7 +345,7 @@ class MainWindow(QMainWindow):
 
     def _stabilize_right_docks(self, active: str | None = None) -> None:
         self.setTabPosition(Qt.DockWidgetArea.RightDockWidgetArea, QTabWidget.TabPosition.North)
-        if active in {"search", "outline"}:
+        if active in {"search", "outline", "kb"}:
             self._show_right_sidebar(active)
             return
 
@@ -347,6 +357,9 @@ class MainWindow(QMainWindow):
         elif self.outline_dock.isVisible():
             self._active_right_sidebar = "outline"
             self._sync_right_sidebar_actions("outline")
+        elif self.kb_dock.isVisible():
+            self._active_right_sidebar = "kb"
+            self._sync_right_sidebar_actions("kb")
         else:
             self._sync_right_sidebar_actions(None)
 
@@ -354,27 +367,39 @@ class MainWindow(QMainWindow):
         blockers = [
             QSignalBlocker(self.actions.toggle_search),
             QSignalBlocker(self.actions.toggle_outline),
+            QSignalBlocker(self.actions.toggle_kb),
         ]
         self.actions.toggle_search.setChecked(active == "search")
         self.actions.toggle_outline.setChecked(active == "outline")
+        self.actions.toggle_kb.setChecked(active == "kb")
         del blockers
 
     def _show_right_sidebar(self, active: str, *, focus: bool = False) -> None:
-        if active not in {"search", "outline"}:
+        if active not in {"search", "outline", "kb"}:
             active = "outline"
 
         self._active_right_sidebar = active
         self.setTabPosition(Qt.DockWidgetArea.RightDockWidgetArea, QTabWidget.TabPosition.North)
         self.tabifyDockWidget(self.search_dock, self.outline_dock)
+        self.tabifyDockWidget(self.outline_dock, self.kb_dock)
 
         if active == "search":
             self.outline_dock.hide()
+            self.kb_dock.hide()
             self.search_dock.show()
             self.search_dock.raise_()
             if focus:
                 self.search_dock.focus_search()
+        elif active == "kb":
+            self.search_dock.hide()
+            self.outline_dock.hide()
+            self.kb_dock.show()
+            self.kb_dock.raise_()
+            if focus:
+                self.kb_dock.focus_default()
         else:
             self.search_dock.hide()
+            self.kb_dock.hide()
             self.outline_dock.show()
             self.outline_dock.raise_()
             if focus:
@@ -385,6 +410,7 @@ class MainWindow(QMainWindow):
     def _hide_right_sidebar(self) -> None:
         self.search_dock.hide()
         self.outline_dock.hide()
+        self.kb_dock.hide()
         self._sync_right_sidebar_actions(None)
 
     def _handle_search_visibility_action(self, checked: bool) -> None:
@@ -397,6 +423,12 @@ class MainWindow(QMainWindow):
         if checked:
             self._show_right_sidebar("outline", focus=True)
         elif self._active_right_sidebar == "outline":
+            self._hide_right_sidebar()
+
+    def _handle_kb_visibility_action(self, checked: bool) -> None:
+        if checked:
+            self._show_right_sidebar("kb", focus=True)
+        elif self._active_right_sidebar == "kb":
             self._hide_right_sidebar()
 
     def _set_main_toolbar_expanded(self, expanded: bool) -> None:
@@ -466,7 +498,7 @@ class MainWindow(QMainWindow):
             title=galaxy_title,
             color=SUN_COLOR,
             path=workspace_root,
-            description="Agni 工作区",
+            description="NeuX 工作区",
             tags=("工作区",),
         )
         planets: list[KnowledgeGraphNode] = []
@@ -547,6 +579,7 @@ class MainWindow(QMainWindow):
         self.actions.save_note.triggered.connect(self.save_current_note)
         self.actions.delete_note.triggered.connect(self.delete_current_note)
         self.actions.open_pdf.triggered.connect(self.open_pdf_from_dialog)
+        self.actions.open_ppt.triggered.connect(self.open_ppt_from_dialog)
         self.actions.previous_pdf_page.triggered.connect(self.go_previous_pdf_page)
         self.actions.next_pdf_page.triggered.connect(self.go_next_pdf_page)
         self.actions.zoom_in_pdf.triggered.connect(self.zoom_in_pdf)
@@ -563,11 +596,12 @@ class MainWindow(QMainWindow):
         self.actions.toggle_notes.toggled.connect(self.note_dock.setVisible)
         self.actions.toggle_search.triggered.connect(self._handle_search_visibility_action)
         self.actions.toggle_outline.triggered.connect(self._handle_outline_visibility_action)
+        self.actions.toggle_kb.triggered.connect(self._handle_kb_visibility_action)
         self.note_dock.visibilityChanged.connect(self.actions.toggle_notes.setChecked)
 
         self.note_dock.note_selected.connect(self.open_note)
         self.note_dock.delete_note_requested.connect(self.delete_note)
-        self.note_dock.reference_selected.connect(self.open_pdf_placeholder)
+        self.note_dock.reference_selected.connect(self._open_document_file)
         self.note_dock.knowledge_selected.connect(self.open_knowledge_object)
         self.cover_graph.node_selected.connect(self.open_knowledge_object)
         self.cover_graph.add_planet_requested.connect(self.add_planet_from_graph)
@@ -729,7 +763,6 @@ class MainWindow(QMainWindow):
     def _on_tab_changed(self, index: int) -> None:
         widget = self.workspace_tabs.widget(index)
         if isinstance(widget, NoteEditorWidget):
-            self._set_pdf_reading_mode(False)
             self.editor = widget
             self.current_note_path = self._current_note_path()
             if self.current_note_path is not None:
@@ -737,11 +770,11 @@ class MainWindow(QMainWindow):
             self._refresh_document_panels()
         elif widget is not None:
             self.current_note_path = None
-            if isinstance(widget, PdfViewerWidget):
-                self._set_pdf_reading_mode(True)
+            if isinstance(widget, PptViewerWidget):
+                self.status_label.setText("PPT 阅读器")
+            elif isinstance(widget, PdfViewerWidget):
                 self.status_label.setText("PDF 阅读器")
             else:
-                self._set_pdf_reading_mode(False)
                 self.status_label.setText("工作台页面")
 
     def _close_tab(self, index: int) -> None:
@@ -762,43 +795,13 @@ class MainWindow(QMainWindow):
         widget.deleteLater()
         self._refresh_tab_close_buttons()
 
-    def _set_pdf_reading_mode(self, enabled: bool) -> None:
-        if enabled:
-            if self._pre_pdf_dock_visibility is None:
-                self._pre_pdf_dock_visibility = (
-                    self.note_dock.isVisible(),
-                    self.search_dock.isVisible(),
-                    self.outline_dock.isVisible(),
-                )
-            self.note_dock.hide()
-            self.search_dock.hide()
-            self.outline_dock.hide()
-            return
-
-        previous = self._pre_pdf_dock_visibility
-        self._pre_pdf_dock_visibility = None
-        if previous is None:
-            return
-        note_visible, search_visible, outline_visible = previous
-        self.note_dock.setVisible(note_visible)
-        self.actions.toggle_notes.setChecked(note_visible)
-        if search_visible or outline_visible:
-            if search_visible and not outline_visible:
-                active = "search"
-            elif outline_visible and not search_visible:
-                active = "outline"
-            else:
-                active = self._active_right_sidebar
-            self._show_right_sidebar(active)
-        else:
-            self._hide_right_sidebar()
-
     def _load_workspace(self) -> None:
         self.search_dock.set_search_controller(self.search_controller)
         self.outline_dock.set_reference_controller(self.reference_controller)
         self.note_dock.set_workspace(self.workspace_root)
         self.search_dock.set_workspace(self.workspace_root)
         self.outline_dock.set_workspace(self.workspace_root)
+        self.kb_dock.set_workspace(self.workspace_root)
         self._sync_workspace_pdfs_to_references()
         self._refresh_knowledge_model_from_controller()
         self._sync_cover_graph()
@@ -1402,7 +1405,7 @@ class MainWindow(QMainWindow):
             self._show_message(
                 QMessageBox.Icon.Information,
                 "暂无可删除工作区",
-                "当前工作区总目录下还没有可删除的 Agni 工作区。",
+                "当前工作区总目录下还没有可删除的 NeuX 工作区。",
             )
             return
 
@@ -1427,7 +1430,7 @@ class MainWindow(QMainWindow):
             self._show_message(
                 QMessageBox.Icon.Warning,
                 "删除范围无效",
-                "只能删除当前工作区总目录下的 Agni 工作区。",
+                "只能删除当前工作区总目录下的 NeuX 工作区。",
             )
             return
 
@@ -1485,7 +1488,7 @@ class MainWindow(QMainWindow):
         if workspace_context is not None and hasattr(workspace_context, "database_path"):
             self.app_context.db_path = Path(workspace_context.database_path)
 
-        self.setWindowTitle(f"Agni - {self.workspace_root.name}")
+        self.setWindowTitle(f"NeuX - {self.workspace_root.name}")
         self.workspace_label.setText(f"工作区：{self.workspace_root}")
         self._reset_tabs_for_workspace()
         self._load_workspace()
@@ -1528,6 +1531,7 @@ class MainWindow(QMainWindow):
             CommandItem("保存当前笔记", self.save_current_note, "保存当前标签页中的 Markdown"),
             CommandItem("删除当前笔记", self.delete_current_note, "删除当前工作区 notes 下的 Markdown"),
             CommandItem("打开 PDF", self.open_pdf_from_dialog, "从 references 或 attachments 打开 PDF 阅读器"),
+            CommandItem("打开 PPT", self.open_ppt_from_dialog, "从 references 或 attachments 打开 PPT (.pptx) 演示文稿"),
             CommandItem("PDF 摘录到笔记", self.insert_pdf_excerpt, "把 PDF 当前选区插入 Markdown 笔记"),
             CommandItem("插入 PDF 引用", self.insert_pdf_citation, "把 PDF citation key 插入当前笔记"),
             CommandItem("打开知识结构图", self.focus_knowledge_model, "聚焦工作区、分类、资源和关联结构"),
@@ -1560,7 +1564,7 @@ class MainWindow(QMainWindow):
             return
 
         if selection.kind == KnowledgeObjectKind.STAR_REFERENCE and selection.path is not None:
-            self.open_pdf_placeholder(selection.path)
+            self._open_document_file(selection.path)
             self.outline_dock.set_object_context(selection)
             return
 
@@ -1570,7 +1574,7 @@ class MainWindow(QMainWindow):
                 if selection.satellites and selection.satellites[0].line_number:
                     self.goto_line(selection.satellites[0].line_number)
             else:
-                self.open_pdf_placeholder(selection.path)
+                self._open_document_file(selection.path)
             self.outline_dock.set_object_context(selection)
             return
 
@@ -1674,6 +1678,21 @@ class MainWindow(QMainWindow):
         if prepared_path is not None:
             self.open_pdf_placeholder(prepared_path)
 
+    def open_ppt_from_dialog(self) -> None:
+        start_dir = self._default_pdf_folder()
+        selected, _filter = QFileDialog.getOpenFileName(
+            self,
+            "打开 PPT",
+            str(start_dir),
+            "PowerPoint Files (*.pptx);;All Files (*.*)",
+        )
+        if not selected:
+            return
+
+        prepared_path = self._prepare_pptx_path_for_open(Path(selected))
+        if prepared_path is not None:
+            self.open_ppt_placeholder(prepared_path)
+
     def go_previous_pdf_page(self) -> None:
         viewer = self._current_pdf_viewer()
         if viewer is not None:
@@ -1722,6 +1741,13 @@ class MainWindow(QMainWindow):
             viewer.request_citation_insert()
         else:
             self.status_label.setText("当前标签页不是 PDF")
+
+    def _open_document_file(self, document_path: object) -> None:
+        path = Path(document_path)
+        if path.suffix.lower() in PPT_SUFFIXES:
+            self.open_ppt_placeholder(path)
+            return
+        self.open_pdf_placeholder(path)
 
     def open_pdf_placeholder(self, pdf_path: object) -> None:
         self.show_workbench()
@@ -1790,6 +1816,28 @@ class MainWindow(QMainWindow):
         )
         self.status_label.setText(f"已打开 PDF 阅读器: {path.name}")
 
+    def open_ppt_placeholder(self, pptx_path: object) -> None:
+        self.show_workbench()
+        path = Path(pptx_path)
+
+        if not path.is_absolute():
+            path = (self.workspace_root / path).resolve()
+
+        for index in range(self.workspace_tabs.count()):
+            if self.workspace_tabs.tabToolTip(index) == str(path):
+                self.workspace_tabs.setCurrentIndex(index)
+                self.status_label.setText(f"已打开 PPT 阅读器: {path.name}")
+                return
+
+        viewer = PptViewerWidget(self)
+        viewer.load_pptx(
+            path,
+            reference_key=self._guess_reference_key(path),
+            cache_dir=self.workspace_root / ".agni" / "ppt_cache",
+        )
+        self._add_pdf_tab(viewer, path)
+        self.status_label.setText(f"已打开 PPT 阅读器: {path.name}")
+
     def _default_pdf_folder(self) -> Path:
         for folder_name in ("references", "attachments"):
             folder = self.workspace_root / folder_name
@@ -1798,7 +1846,7 @@ class MainWindow(QMainWindow):
         return self.workspace_root
 
     def _prepare_pdf_path_for_open(self, pdf_path: Path) -> Path | None:
-        if self._is_workspace_pdf_path(pdf_path):
+        if self._is_workspace_document_path(pdf_path):
             return pdf_path
 
         if pdf_path.suffix.lower() != ".pdf" or not pdf_path.exists() or not pdf_path.is_file():
@@ -1814,28 +1862,54 @@ class MainWindow(QMainWindow):
             return None
 
         try:
-            return self._copy_pdf_to_attachments(pdf_path)
+            return self._copy_document_to_attachments(pdf_path)
         except OSError as error:
             self._show_message(QMessageBox.Icon.Critical, "PDF 导入失败", str(error))
             return None
 
-    def _is_workspace_pdf_path(self, pdf_path: Path) -> bool:
+    def _prepare_pptx_path_for_open(self, pptx_path: Path) -> Path | None:
+        if self._is_workspace_document_path(pptx_path):
+            return pptx_path
+
+        if pptx_path.suffix.lower() not in PPT_SUFFIXES or not pptx_path.exists() or not pptx_path.is_file():
+            self._show_message(
+                QMessageBox.Icon.Warning,
+                "PPT 打开失败",
+                "请选择一个存在的 .pptx 演示文稿。",
+            )
+            return None
+
+        if not self._ask_confirmation(
+            "导入 PPT 到工作区",
+            f"该 PPT 不在当前工作区 references/ 或 attachments/ 下：\n{pptx_path}\n\n"
+            "需要先复制到当前工作区 attachments/ 后才能进行阅读与索引。",
+            confirm_text="导入并打开",
+        ):
+            return None
+
         try:
-            relative = pdf_path.resolve().relative_to(self.workspace_root.resolve())
+            return self._copy_document_to_attachments(pptx_path)
+        except OSError as error:
+            self._show_message(QMessageBox.Icon.Critical, "PPT 导入失败", str(error))
+            return None
+
+    def _is_workspace_document_path(self, document_path: Path) -> bool:
+        try:
+            relative = document_path.resolve().relative_to(self.workspace_root.resolve())
         except ValueError:
             return False
         return bool(relative.parts) and relative.parts[0] in {"attachments", "references"}
 
-    def _copy_pdf_to_attachments(self, pdf_path: Path) -> Path:
+    def _copy_document_to_attachments(self, document_path: Path) -> Path:
         attachments_dir = self.workspace_root / "attachments"
         attachments_dir.mkdir(parents=True, exist_ok=True)
-        target = attachments_dir / pdf_path.name
+        target = attachments_dir / document_path.name
         counter = 2
-        while target.exists() and target.resolve() != pdf_path.resolve():
-            target = attachments_dir / f"{pdf_path.stem}-{counter}{pdf_path.suffix}"
+        while target.exists() and target.resolve() != document_path.resolve():
+            target = attachments_dir / f"{document_path.stem}-{counter}{document_path.suffix}"
             counter += 1
-        if target.resolve() != pdf_path.resolve():
-            shutil.copy2(pdf_path, target)
+        if target.resolve() != document_path.resolve():
+            shutil.copy2(document_path, target)
         return target
 
     def _load_pdf_document_page_count(self, pdf_path: Path) -> int | None:
@@ -2012,11 +2086,14 @@ class MainWindow(QMainWindow):
 
     def _on_pdf_page_changed(self, viewer: PdfViewerWidget, page_number: int) -> None:
         if self.workspace_tabs.currentWidget() is viewer:
-            self.status_label.setText(f"PDF 第 {page_number} 页")
+            if isinstance(viewer, PptViewerWidget):
+                self.status_label.setText(f"PPT 第 {page_number} 张幻灯片")
+            else:
+                self.status_label.setText(f"PDF 第 {page_number} 页")
 
     def _on_pdf_zoom_changed(self, viewer: PdfViewerWidget, zoom_factor: float) -> None:
         if self.workspace_tabs.currentWidget() is viewer:
-            self.status_label.setText(f"PDF 缩放 {int(zoom_factor * 100)}%")
+            self.status_label.setText(f"缩放 {int(zoom_factor * 100)}%")
 
     def _handle_pdf_annotation_request(self, draft: object) -> None:
         pdf_path = Path(getattr(draft, "pdf_path", ""))
@@ -2178,8 +2255,8 @@ class MainWindow(QMainWindow):
     def show_about_dialog(self) -> None:
         self._show_message(
             QMessageBox.Icon.Information,
-            "关于 Agni",
-            "Agni 当前工作台已接入笔记、搜索、反向链接、文献、PDF 与知识结构后端接口。界面继续保留三栏布局、Markdown 编辑、星图、文档导航和 PDF 阅读等现有交互。",
+            "关于 NeuX",
+            "NeuX 当前工作台已接入笔记、搜索、反向链接、文献、PDF 与知识结构后端接口。界面继续保留三栏布局、Markdown 编辑、星图、文档导航和 PDF 阅读等现有交互。",
         )
 
     def _show_message(self, icon: QMessageBox.Icon, title: str, text: str) -> None:

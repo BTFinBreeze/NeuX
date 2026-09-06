@@ -673,6 +673,101 @@ class NoteListDock(QDockWidget):
             )
             graph_stars_by_planet.setdefault(custom_planet, [])
 
+        # 工作区里尚未登记为参考文献的文档（例如 PowerPoint 附件）也追加到
+        # “全部”树中，保证每个 workspace 文档都能被发现与打开。
+        galaxy_item = self.knowledge_tree.topLevelItem(0)
+        if galaxy_item is not None:
+            rendered_paths: set[Path] = set()
+            for planet_index in range(galaxy_item.childCount()):
+                planet_item = galaxy_item.child(planet_index)
+                for star_index in range(planet_item.childCount()):
+                    star_item = planet_item.child(star_index)
+                    if (
+                        star_item.data(0, KNOWLEDGE_KIND_ROLE)
+                        == KnowledgeObjectKind.STAR_REFERENCE.value
+                    ):
+                        path_value = star_item.data(0, KNOWLEDGE_PATH_ROLE)
+                        if path_value:
+                            rendered_paths.add(Path(str(path_value)).resolve())
+            for doc_path in self._iter_reference_paths():
+                if doc_path.suffix.lower() != ".pptx":
+                    continue
+                try:
+                    if doc_path.resolve() in rendered_paths:
+                        continue
+                except OSError:
+                    continue
+                target_planet_title = self._display_planet_title("Reading")
+                if target_planet_title not in planet_items:
+                    if self._planet_is_hidden("Reading"):
+                        target_planet_title = UNASSIGNED_PLANET_TITLE
+                    else:
+                        reading_planet = QTreeWidgetItem([f"分类  {target_planet_title}"])
+                        reading_planet.setData(0, KNOWLEDGE_KIND_ROLE, KnowledgeObjectKind.PLANET.value)
+                        reading_planet.setData(0, KNOWLEDGE_DESCRIPTION_ROLE, "文献、PDF 与阅读摘录")
+                        reading_planet.setData(0, PLANET_KEY_ROLE, "Reading")
+                        galaxy_item.addChild(reading_planet)
+                        planet_items[target_planet_title] = reading_planet
+                        graph_planets.append(
+                            KnowledgeGraphNode(
+                                kind=KnowledgeObjectKind.PLANET,
+                                title=target_planet_title,
+                                color=PLANET_COLORS.get(target_planet_title, PLANET_DEFAULT_COLOR),
+                                description="文献、PDF 与阅读摘录",
+                                planet=target_planet_title,
+                            )
+                        )
+                if target_planet_title not in planet_items:
+                    unassigned_planet = QTreeWidgetItem([f"分类  {UNASSIGNED_PLANET_TITLE}"])
+                    unassigned_planet.setData(0, KNOWLEDGE_KIND_ROLE, KnowledgeObjectKind.PLANET.value)
+                    unassigned_planet.setData(0, KNOWLEDGE_DESCRIPTION_ROLE, "尚未归入具体分类的对象")
+                    unassigned_planet.setData(0, PLANET_KEY_ROLE, UNASSIGNED_PLANET_KEY)
+                    galaxy_item.addChild(unassigned_planet)
+                    planet_items[target_planet_title] = unassigned_planet
+                    if not any(node.title == target_planet_title for node in graph_planets):
+                        graph_planets.append(
+                            KnowledgeGraphNode(
+                                kind=KnowledgeObjectKind.PLANET,
+                                title=target_planet_title,
+                                color=PLANET_COLORS.get(target_planet_title, PLANET_DEFAULT_COLOR),
+                                description="尚未归入具体分类的对象",
+                                planet=target_planet_title,
+                            )
+                        )
+
+                star = QTreeWidgetItem([f"文献  {doc_path.name}"])
+                star.setToolTip(0, str(doc_path))
+                star.setData(0, KNOWLEDGE_KIND_ROLE, KnowledgeObjectKind.STAR_REFERENCE.value)
+                star.setData(0, KNOWLEDGE_PATH_ROLE, str(doc_path))
+                star.setData(0, KNOWLEDGE_DESCRIPTION_ROLE, "文献或附件")
+                planet_items[target_planet_title].addChild(star)
+
+                satellite_item = SatelliteItem(
+                    title="元数据 / 批注占位",
+                    kind="pdf-placeholder",
+                    host_title=doc_path.name,
+                    line_number=None,
+                    preview="后续接入 PDF 批注、摘录、版本记录。",
+                )
+                graph_stars_by_planet.setdefault(target_planet_title, []).append(
+                    KnowledgeGraphNode(
+                        kind=KnowledgeObjectKind.STAR_REFERENCE,
+                        title=doc_path.name,
+                        color=PLANET_COLORS.get(target_planet_title, PLANET_DEFAULT_COLOR),
+                        path=doc_path,
+                        description="文献或附件",
+                        planet=target_planet_title,
+                        tags=("文献", doc_path.suffix.lower().lstrip(".")),
+                        satellites=(satellite_item,),
+                    )
+                )
+                satellite = QTreeWidgetItem([f"关联  {satellite_item.title}"])
+                satellite.setData(0, KNOWLEDGE_KIND_ROLE, KnowledgeObjectKind.SATELLITE.value)
+                satellite.setData(0, KNOWLEDGE_PATH_ROLE, str(doc_path))
+                satellite.setData(0, KNOWLEDGE_DESCRIPTION_ROLE, satellite_item.preview)
+                satellite.setData(0, KNOWLEDGE_LINE_ROLE, None)
+                star.addChild(satellite)
+
         self.knowledge_tree.expandToDepth(1)
         galaxy_node = KnowledgeGraphNode(
             kind=KnowledgeObjectKind.GALAXY,
@@ -1120,7 +1215,8 @@ class NoteListDock(QDockWidget):
                 candidates.extend(
                     path
                     for path in folder.rglob("*")
-                    if path.is_file() and path.suffix.lower() in {".pdf", ".bib", ".ris"}
+                    if path.is_file()
+                    and path.suffix.lower() in {".pdf", ".pptx", ".bib", ".ris"}
                 )
         return sorted(candidates, key=lambda item: item.name.lower())
 

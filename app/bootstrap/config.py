@@ -4,8 +4,8 @@ from pathlib import Path
 
 @dataclass(slots=True)
 class AppConfig:
-    app_name: str = "Agni"
-    organization_name: str = "Agni Team"
+    app_name: str = "NeuX"
+    organization_name: str = "NeuX Team"
 
 
 @dataclass(slots=True)

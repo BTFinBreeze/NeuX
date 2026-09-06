@@ -34,6 +34,7 @@ class AgniActionSet:
     save_note: QAction
     delete_note: QAction
     open_pdf: QAction
+    open_ppt: QAction
     previous_pdf_page: QAction
     next_pdf_page: QAction
     zoom_in_pdf: QAction
@@ -46,6 +47,7 @@ class AgniActionSet:
     toggle_notes: QAction
     toggle_search: QAction
     toggle_outline: QAction
+    toggle_kb: QAction
     toggle_main_toolbar: QAction
     refresh_workspace: QAction
     about: QAction
@@ -63,7 +65,7 @@ class AgniActionSet:
                 parent,
                 "打开工作区",
                 shortcut="Ctrl+O",
-                status_tip="选择一个 Agni 工作区目录",
+                status_tip="选择一个 NeuX 工作区目录",
             ),
             save_note=create_action(
                 parent,
@@ -83,44 +85,50 @@ class AgniActionSet:
                 shortcut="Ctrl+Shift+O",
                 status_tip="从当前工作区选择并打开 PDF",
             ),
+            open_ppt=create_action(
+                parent,
+                "打开 PPT",
+                shortcut="Ctrl+Shift+P",
+                status_tip="从当前工作区选择并打开 PPT (.pptx) 演示文稿",
+            ),
             previous_pdf_page=create_action(
                 parent,
-                "PDF 上一页",
+                "上一页",
                 shortcut="Alt+Left",
-                status_tip="跳转到 PDF 上一页",
+                status_tip="跳转到 PDF / PPT 上一页",
             ),
             next_pdf_page=create_action(
                 parent,
-                "PDF 下一页",
+                "下一页",
                 shortcut="Alt+Right",
-                status_tip="跳转到 PDF 下一页",
+                status_tip="跳转到 PDF / PPT 下一页",
             ),
             zoom_in_pdf=create_action(
                 parent,
-                "PDF 放大",
+                "放大",
                 shortcut="Ctrl++",
-                status_tip="放大当前 PDF 页面",
+                status_tip="放大当前页面",
             ),
             zoom_out_pdf=create_action(
                 parent,
-                "PDF 缩小",
+                "缩小",
                 shortcut="Ctrl+-",
-                status_tip="缩小当前 PDF 页面",
+                status_tip="缩小当前页面",
             ),
             fit_pdf_width=create_action(
                 parent,
-                "PDF 适宽",
-                status_tip="将当前 PDF 页面适配窗口宽度",
+                "适宽",
+                status_tip="将当前页面适配窗口宽度",
             ),
             insert_pdf_excerpt=create_action(
                 parent,
                 "摘录到笔记",
-                status_tip="将当前 PDF 选区作为 Markdown 摘录插入笔记",
+                status_tip="将当前选区作为 Markdown 摘录插入笔记",
             ),
             insert_pdf_citation=create_action(
                 parent,
                 "插入引用",
-                status_tip="向当前笔记插入 PDF 文献引用占位",
+                status_tip="向当前笔记插入文献引用占位",
             ),
             command_palette=create_action(
                 parent,
@@ -155,6 +163,13 @@ class AgniActionSet:
                 checkable=True,
                 checked=True,
             ),
+            toggle_kb=create_action(
+                parent,
+                "本地知识库问答",
+                status_tip="显示或隐藏本地知识库问答面板",
+                checkable=True,
+                checked=True,
+            ),
             toggle_main_toolbar=create_action(
                 parent,
                 "收起工具栏",
@@ -171,7 +186,7 @@ class AgniActionSet:
             ),
             about=create_action(
                 parent,
-                "关于 Agni",
+                "关于 NeuX",
                 status_tip="查看当前工作台说明",
             ),
         )

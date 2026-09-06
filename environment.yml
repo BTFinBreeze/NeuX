@@ -13,3 +13,9 @@ dependencies:
   - pip:
       - pymupdf
       - pymysql
+      - chromadb
+      - sentence-transformers
+      - python-dotenv
+      - httpx
+      - tiktoken
+      - python-pptx
